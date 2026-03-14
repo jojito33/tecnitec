@@ -6928,11 +6928,14 @@ nav = async function(v) {
 
   const UPDATE_URL     = 'https://jojito33.github.io/tecnitec/index.html';
   const VERSION_URL    = 'https://jojito33.github.io/tecnitec/version.json';
-  const VERSION_ACTUAL = '31.78';
+  const VERSION_BASE   = '31.78';  // versión del archivo original
+  // Si ya se actualizó antes, usar la versión instalada guardada
+  const VERSION_ACTUAL = localStorage.getItem('tc_version_instalada') || VERSION_BASE;
   const CHECK_INTERVAL = 30 * 60 * 1000; // cada 30 min
 
-  let _updPendingUrl  = null;
-  let _updMainUrl     = null;   // URL del main.js si necesita actualizarse
+  let _updPendingUrl     = null;
+  let _updPendingVersion = null;  // versión que se está instalando
+  let _updMainUrl        = null;  // URL del main.js si necesita actualizarse
 
   function esVersionMayor(nueva, actual) {
     const p = v => v.trim().split('.').map(Number);
@@ -6959,12 +6962,15 @@ nav = async function(v) {
         if (!nueva) { console.warn('[UPDATE] version.json no tiene campo "version"'); }
         else if (esVersionMayor(nueva, VERSION_ACTUAL)) {
           console.log('[UPDATE] ¡Nueva versión!', nueva, '>', VERSION_ACTUAL);
-          _updPendingUrl = data.url || UPDATE_URL;
-          _updMainUrl    = data.main_update ? (data.main_url || null) : null;
+          _updPendingUrl     = data.url || UPDATE_URL;
+          _updPendingVersion = nueva;
+          _updMainUrl        = data.main_update ? (data.main_url || null) : null;
           mostrarBanner(nueva, data.notas || '', !!data.main_update, data.main_url || null);
           return;
         } else {
           console.log('[UPDATE] Sin actualización. Remota:', nueva, '— Local:', VERSION_ACTUAL);
+          // Asegurarse de que localStorage refleje la versión correcta
+          localStorage.setItem('tc_version_instalada', nueva);
         }
         return; // version.json respondió OK, no hace falta fallback
       }
@@ -6984,7 +6990,8 @@ nav = async function(v) {
       console.log('[UPDATE] Meta app-version en remoto:', match ? match[1] : 'no encontrado');
       if (match && esVersionMayor(match[1], VERSION_ACTUAL)) {
         console.log('[UPDATE] ¡Nueva versión vía fallback!', match[1]);
-        _updPendingUrl = UPDATE_URL;
+        _updPendingUrl     = UPDATE_URL;
+        _updPendingVersion = match[1];
         mostrarBanner(match[1], '');
       }
     } catch(e2) {
@@ -7097,6 +7104,8 @@ nav = async function(v) {
           setBar(100);
           setBtnEstado('✅ ¡Listo! Recargando...', true);
           console.log('[UPDATE] Instalado correctamente, recargando...');
+          // Guardar versión instalada para no volver a mostrar el banner
+          if (_updPendingVersion) localStorage.setItem('tc_version_instalada', _updPendingVersion);
           setTimeout(() => location.reload(), 800);
           return;
         }
