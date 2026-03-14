@@ -3063,13 +3063,224 @@ ${(cfg.mensaje_bienvenida || '').replace(/{nombre}/g, 'Juan').replace(/{negocio}
         function cerrarConfirm() { document.getElementById('modal-confirm').style.display = 'none'; }
 
         function renderReportes(area) {
-            const listos = store.ordenes.filter(o => o.estado === 'Listo').length;
-            const pendientes = store.ordenes.filter(o => o.estado === 'Pendiente').length;
-            const totalSaldo = store.ordenes.filter(o => o.estado !== 'Entregado').reduce((acc, o) => acc + (o.presupuesto - o.sena), 0);
-            area.innerHTML = `<h1>Estadísticas</h1><div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px">
-                <div class="stat-card"><h3>${listos}</h3><span class="info-label">Equipos Listos</span></div>
-                <div class="stat-card" style="border-left-color:var(--warning)"><h3>${pendientes}</h3><span class="info-label">Equipos Pendientes</span></div>
-                <div class="stat-card" style="border-left-color:var(--success)"><h3>$${totalSaldo}</h3><span class="info-label">Saldo por Cobrar</span></div>
+            if (!area) area = document.getElementById('content-area');
+
+            // ── Calcular métricas ──────────────────────────────────────────
+            const ords      = store.ordenes  || [];
+            const clientes  = store.clientes || [];
+            const productos = store.productos|| [];
+
+            const listos      = ords.filter(o => o.estado === 'Listo').length;
+            const pendientes  = ords.filter(o => o.estado === 'Pendiente').length;
+            const entregados  = ords.filter(o => o.estado === 'Entregado').length;
+            const totalSaldo  = ords.filter(o => o.estado !== 'Entregado')
+                                    .reduce((a,o) => a + ((o.presupuesto||0)-(o.sena||0)), 0);
+            const totalCobrado= ords.reduce((a,o) => a + (o.sena||0), 0);
+            const totalPresup = ords.reduce((a,o) => a + (o.presupuesto||0), 0);
+
+            // Órdenes este mes
+            const ahora   = new Date();
+            const mesAct  = ahora.getMonth();
+            const anioAct = ahora.getFullYear();
+            const ordsMes = ords.filter(o => {
+                const f = new Date(o.fecha_hora);
+                return f.getMonth()===mesAct && f.getFullYear()===anioAct;
+            });
+
+            // Marcas más frecuentes
+            const marcaMap = {};
+            ords.forEach(o => { const m=(o.marca||'Sin marca').trim(); marcaMap[m]=(marcaMap[m]||0)+1; });
+            const topMarcas = Object.entries(marcaMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+            const maxMarca  = topMarcas[0]?.[1] || 1;
+
+            // Órdenes por estado para dona
+            const estadoData = [
+                { label:'Pendiente', val:pendientes, color:'#f59e0b' },
+                { label:'Listo',     val:listos,     color:'#10b981' },
+                { label:'Entregado', val:entregados, color:'#3b82f6' },
+            ];
+            const totalDona = pendientes + listos + entregados || 1;
+
+            // Actividad últimos 7 días
+            const dias7 = Array.from({length:7}, (_,i) => {
+                const d = new Date(); d.setDate(d.getDate()-6+i);
+                return { label: d.toLocaleDateString('es-AR',{weekday:'short'}), date: d.toDateString() };
+            });
+            dias7.forEach(d => {
+                d.count = ords.filter(o => new Date(o.fecha_hora).toDateString()===d.date).length;
+            });
+            const maxDia = Math.max(...dias7.map(d=>d.count), 1);
+
+            // Ingresos últimos 6 meses
+            const meses6 = Array.from({length:6}, (_,i) => {
+                const d = new Date(); d.setMonth(d.getMonth()-5+i);
+                return { label: d.toLocaleDateString('es-AR',{month:'short'}), m: d.getMonth(), y: d.getFullYear() };
+            });
+            meses6.forEach(m => {
+                m.total = ords.filter(o => {
+                    const f=new Date(o.fecha_hora); return f.getMonth()===m.m&&f.getFullYear()===m.y;
+                }).reduce((a,o)=>a+(o.presupuesto||0),0);
+            });
+            const maxMes = Math.max(...meses6.map(m=>m.total), 1);
+
+            // Stock bajo
+            const stockBajo = productos.filter(p => (p.stock||0) <= 5 && (p.stock||0) >= 0)
+                                        .sort((a,b)=>(a.stock||0)-(b.stock||0)).slice(0,5);
+
+            // ── HTML ───────────────────────────────────────────────────────
+            area.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+                <h1 style="margin:0;">📊 Estadísticas</h1>
+                <span style="font-size:.78rem;color:var(--text-muted);background:var(--accent);padding:4px 12px;border-radius:20px;">
+                    ${new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
+                </span>
+            </div>
+
+            <!-- KPIs principales -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-bottom:24px;">
+                ${[
+                    { icon:'⏳', val:pendientes,  label:'Pendientes',    color:'#f59e0b', bg:'rgba(245,158,11,.1)'  },
+                    { icon:'✅', val:listos,       label:'Listos',        color:'#10b981', bg:'rgba(16,185,129,.1)'  },
+                    { icon:'📦', val:entregados,   label:'Entregados',    color:'#3b82f6', bg:'rgba(59,130,246,.1)'  },
+                    { icon:'💰', val:'$'+totalSaldo.toLocaleString('es-AR'), label:'Saldo a cobrar', color:'#ef4444', bg:'rgba(239,68,68,.1)' },
+                    { icon:'🧾', val:'$'+totalCobrado.toLocaleString('es-AR'), label:'Señas cobradas', color:'#8b5cf6', bg:'rgba(139,92,246,.1)' },
+                    { icon:'👥', val:clientes.length, label:'Clientes', color:'#06b6d4', bg:'rgba(6,182,212,.1)' },
+                ].map(k=>`
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:8px;">
+                    <div style="width:36px;height:36px;border-radius:10px;background:${k.bg};display:flex;align-items:center;justify-content:center;font-size:1.1rem;">${k.icon}</div>
+                    <div style="font-size:1.4rem;font-weight:900;color:${k.color};line-height:1;">${k.val}</div>
+                    <div style="font-size:.72rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">${k.label}</div>
+                </div>`).join('')}
+            </div>
+
+            <!-- Fila 2: Dona + Barras actividad -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+
+                <!-- Dona de estados -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:16px;">Órdenes por estado</div>
+                    <div style="display:flex;align-items:center;gap:20px;">
+                        <svg viewBox="0 0 80 80" width="90" height="90" style="flex-shrink:0;">
+                            ${(()=>{
+                                let offset=0; const r=28; const c=40; const circ=2*Math.PI*r;
+                                return estadoData.map(e=>{
+                                    const pct=e.val/totalDona;
+                                    const dash=pct*circ; const gap=circ-dash;
+                                    const svg=`<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${e.color}" stroke-width="12"
+                                        stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${-offset*circ}" stroke-linecap="butt" transform="rotate(-90 ${c} ${c})"/>`;
+                                    offset+=pct; return svg;
+                                }).join('');
+                            })()}
+                            <text x="40" y="38" text-anchor="middle" font-size="11" font-weight="800" fill="var(--text)">${ords.length}</text>
+                            <text x="40" y="50" text-anchor="middle" font-size="7" fill="var(--text-muted)">total</text>
+                        </svg>
+                        <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+                            ${estadoData.map(e=>`
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <div style="width:10px;height:10px;border-radius:3px;background:${e.color};flex-shrink:0;"></div>
+                                <span style="font-size:.82rem;color:var(--text);flex:1;">${e.label}</span>
+                                <span style="font-size:.82rem;font-weight:800;color:${e.color};">${e.val}</span>
+                                <span style="font-size:.72rem;color:var(--text-muted);">${Math.round(e.val/totalDona*100)}%</span>
+                            </div>`).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actividad 7 días -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:16px;">Actividad últimos 7 días</div>
+                    <div style="display:flex;align-items:flex-end;gap:8px;height:80px;">
+                        ${dias7.map(d=>`
+                        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+                            <span style="font-size:.65rem;color:var(--text-muted);">${d.count||''}</span>
+                            <div style="width:100%;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#6366f1,#3b82f6);
+                                height:${Math.max(d.count/maxDia*60,d.count>0?6:2)}px;transition:height .3s;opacity:${d.count>0?1:.25};"></div>
+                            <span style="font-size:.62rem;color:var(--text-muted);text-transform:capitalize;">${d.label}</span>
+                        </div>`).join('')}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fila 3: Ingresos por mes + Top marcas -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+
+                <!-- Ingresos 6 meses -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:16px;">Ingresos últimos 6 meses</div>
+                    <div style="display:flex;align-items:flex-end;gap:8px;height:90px;">
+                        ${meses6.map((m,i)=>`
+                        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+                            <span style="font-size:.6rem;color:var(--text-muted);">${m.total>0?'$'+Math.round(m.total/1000)+'k':''}</span>
+                            <div style="width:100%;border-radius:6px 6px 0 0;
+                                background:linear-gradient(180deg,#10b981,#059669);
+                                height:${Math.max(m.total/maxMes*70,m.total>0?6:2)}px;
+                                opacity:${i===5?1:.65};transition:height .3s;"></div>
+                            <span style="font-size:.65rem;color:${i===5?'var(--text)':'var(--text-muted)'};font-weight:${i===5?700:400};text-transform:capitalize;">${m.label}</span>
+                        </div>`).join('')}
+                    </div>
+                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--accent);display:flex;justify-content:space-between;align-items:center;">
+                        <span style="font-size:.72rem;color:var(--text-muted);">Total acumulado</span>
+                        <span style="font-size:.95rem;font-weight:800;color:#10b981;">$${totalPresup.toLocaleString('es-AR')}</span>
+                    </div>
+                </div>
+
+                <!-- Top marcas -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:16px;">Top marcas en taller</div>
+                    ${topMarcas.length===0
+                        ? '<div style="color:var(--text-muted);font-size:.85rem;text-align:center;padding:20px 0;">Sin datos aún</div>'
+                        : topMarcas.map(([marca,qty],i)=>`
+                    <div style="margin-bottom:10px;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                            <span style="font-size:.83rem;color:var(--text);font-weight:${i===0?700:400};">${marca}</span>
+                            <span style="font-size:.78rem;color:var(--text-muted);">${qty} orden${qty!==1?'es':''}</span>
+                        </div>
+                        <div style="height:6px;background:var(--accent);border-radius:3px;overflow:hidden;">
+                            <div style="height:100%;width:${qty/maxMarca*100}%;background:${['#ef4444','#f97316','#f59e0b','#84cc16','#06b6d4'][i]};border-radius:3px;transition:width .4s;"></div>
+                        </div>
+                    </div>`).join('')}
+                </div>
+            </div>
+
+            <!-- Fila 4: Este mes + Stock bajo -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                <!-- Este mes -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:14px;">
+                        Este mes — ${new Date().toLocaleDateString('es-AR',{month:'long',year:'numeric'})}
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                        ${[
+                            { label:'Órdenes', val:ordsMes.length, color:'#6366f1' },
+                            { label:'Presupuestado', val:'$'+ordsMes.reduce((a,o)=>a+(o.presupuesto||0),0).toLocaleString('es-AR'), color:'#10b981' },
+                            { label:'Cobrado (señas)', val:'$'+ordsMes.reduce((a,o)=>a+(o.sena||0),0).toLocaleString('es-AR'), color:'#f59e0b' },
+                            { label:'Entregados', val:ordsMes.filter(o=>o.estado==='Entregado').length, color:'#3b82f6' },
+                        ].map(k=>`
+                        <div style="background:var(--accent);border-radius:10px;padding:12px;">
+                            <div style="font-size:.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">${k.label}</div>
+                            <div style="font-size:1.1rem;font-weight:800;color:${k.color};">${k.val}</div>
+                        </div>`).join('')}
+                    </div>
+                </div>
+
+                <!-- Stock bajo -->
+                <div style="background:var(--panel);border:1px solid var(--accent);border-radius:16px;padding:20px;">
+                    <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:14px;">
+                        ⚠️ Stock bajo en productos
+                    </div>
+                    ${stockBajo.length===0
+                        ? '<div style="color:#10b981;font-size:.85rem;text-align:center;padding:16px 0;">✅ Todo el stock está bien</div>'
+                        : stockBajo.map(p=>`
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--accent);">
+                        <span style="font-size:.83rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">${p.nombre}</span>
+                        <span style="font-size:.78rem;font-weight:800;padding:2px 10px;border-radius:20px;
+                            background:${p.stock===0?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)'};
+                            color:${p.stock===0?'#ef4444':'#f59e0b'};">
+                            ${p.stock===0?'Sin stock':p.stock+' unid.'}
+                        </span>
+                    </div>`).join('')}
+                </div>
             </div>`;
         }
 
