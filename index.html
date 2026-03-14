@@ -7000,9 +7000,10 @@ nav = async function(v) {
     if (!banner) { console.error('[UPDATE] Banner no encontrado en el DOM'); return; }
     desc.textContent = 'Versión ' + version + ' disponible.' + (notas ? ' ' + notas : '');
 
-    // Mostrar/ocultar aviso de main.js
-    if (avisoMain) avisoMain.style.display = mainUpdate ? 'block' : 'none';
-    if (mainUpdate && mainUrl) _updMainUrl = mainUrl;
+    // Mostrar/ocultar aviso de main.js — solo si main_update es explícitamente true
+    const necesitaMain = mainUpdate === true;
+    if (avisoMain) avisoMain.style.display = necesitaMain ? 'block' : 'none';
+    _updMainUrl = necesitaMain && mainUrl ? mainUrl : null;
 
     // Si solo hay update de main.js (sin index nuevo), cambiar botón
     if (btnAccion && mainUpdate && !version) {
