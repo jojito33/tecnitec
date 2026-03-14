@@ -6900,13 +6900,19 @@ nav = async function(v) {
   </style>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;">
     <div>
-      <div class="upd-title">🚀 Nueva versión disponible</div>
+      <div class="upd-title" id="upd-title">🚀 Nueva versión disponible</div>
       <div class="upd-sub" id="update-desc">Hay una actualización lista para instalar.</div>
     </div>
     <button onclick="updDismiss()" style="background:none;border:none;color:#475569;cursor:pointer;font-size:1.1rem;padding:0 0 0 8px;line-height:1;">✕</button>
   </div>
+  <!-- Aviso de main.js (se muestra solo cuando es necesario) -->
+  <div id="upd-main-aviso" style="display:none;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:9px 12px;margin-bottom:10px;font-size:.76rem;color:#f59e0b;line-height:1.5;">
+    ⚠️ Esta actualización también requiere reemplazar <strong>main.js</strong> manualmente.<br>
+    <a id="upd-main-link" href="#" onclick="updDescargarMain()" style="color:#fbbf24;text-decoration:underline;cursor:pointer;">⬇ Descargar main.js</a>
+    &nbsp;→ reemplazarlo en la carpeta del proyecto y reiniciar la app.
+  </div>
   <div class="upd-btns">
-    <button class="upd-btn-ok" onclick="updAplicar()">⬇ Actualizar ahora</button>
+    <button class="upd-btn-ok" id="upd-btn-accion" onclick="updAplicar()">⬇ Actualizar ahora</button>
     <button class="upd-btn-no" onclick="updDismiss()">Después</button>
   </div>
   <div class="upd-progress" id="upd-progress">
@@ -6925,7 +6931,8 @@ nav = async function(v) {
   const VERSION_ACTUAL = '31.78';
   const CHECK_INTERVAL = 30 * 60 * 1000; // cada 30 min
 
-  let _updPendingUrl = null;
+  let _updPendingUrl  = null;
+  let _updMainUrl     = null;   // URL del main.js si necesita actualizarse
 
   function esVersionMayor(nueva, actual) {
     const p = v => v.trim().split('.').map(Number);
@@ -6953,7 +6960,8 @@ nav = async function(v) {
         else if (esVersionMayor(nueva, VERSION_ACTUAL)) {
           console.log('[UPDATE] ¡Nueva versión!', nueva, '>', VERSION_ACTUAL);
           _updPendingUrl = data.url || UPDATE_URL;
-          mostrarBanner(nueva, data.notas || '');
+          _updMainUrl    = data.main_update ? (data.main_url || null) : null;
+          mostrarBanner(nueva, data.notas || '', !!data.main_update, data.main_url || null);
           return;
         } else {
           console.log('[UPDATE] Sin actualización. Remota:', nueva, '— Local:', VERSION_ACTUAL);
@@ -6984,12 +6992,24 @@ nav = async function(v) {
     }
   }
 
-  function mostrarBanner(version, notas) {
-    // Nunca bloquear por sessionStorage — siempre mostrar si hay nueva versión
-    const banner = document.getElementById('update-banner');
-    const desc   = document.getElementById('update-desc');
+  function mostrarBanner(version, notas, mainUpdate, mainUrl) {
+    const banner    = document.getElementById('update-banner');
+    const desc      = document.getElementById('update-desc');
+    const avisoMain = document.getElementById('upd-main-aviso');
+    const btnAccion = document.getElementById('upd-btn-accion');
     if (!banner) { console.error('[UPDATE] Banner no encontrado en el DOM'); return; }
     desc.textContent = 'Versión ' + version + ' disponible.' + (notas ? ' ' + notas : '');
+
+    // Mostrar/ocultar aviso de main.js
+    if (avisoMain) avisoMain.style.display = mainUpdate ? 'block' : 'none';
+    if (mainUpdate && mainUrl) _updMainUrl = mainUrl;
+
+    // Si solo hay update de main.js (sin index nuevo), cambiar botón
+    if (btnAccion && mainUpdate && !version) {
+      btnAccion.style.display = 'none';
+    } else if (btnAccion) {
+      btnAccion.style.display = '';
+    }
     banner.style.display    = 'flex';
     banner.style.opacity    = '0';
     banner.style.transform  = 'translateY(20px)';
@@ -7002,6 +7022,21 @@ nav = async function(v) {
     });
     console.log('[UPDATE] Banner mostrado para versión', version);
   }
+
+  // Descargar main.js manualmente
+  window.updDescargarMain = function() {
+    const url = _updMainUrl;
+    if (!url) { if(typeof showToast==='function') showToast('URL de main.js no disponible','warning'); return; }
+    // Abrir link de descarga
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'main.js';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    if(typeof showToast==='function') showToast('📥 Descargando main.js — reemplazalo en la carpeta del proyecto y reiniciá la app', 'info', 7000);
+  };
 
   window.updDismiss = function() {
     const b = document.getElementById('update-banner');
@@ -7019,51 +7054,61 @@ nav = async function(v) {
     const bar  = document.getElementById('upd-progress-bar');
     const prog = document.getElementById('upd-progress');
     const btn  = document.querySelector('#update-banner .upd-btn-ok');
-    if (btn)  { btn.disabled = true; btn.textContent = 'Descargando...'; }
-    if (prog) prog.style.display = 'block';
-    if (bar)  bar.style.width   = '20%';
+
+    function setBtnEstado(txt, disabled) {
+      if (btn) { btn.disabled = disabled; btn.textContent = txt; }
+    }
+    function setBar(pct) {
+      if (prog) prog.style.display = 'block';
+      if (bar)  bar.style.width = pct + '%';
+    }
+
+    setBtnEstado('Descargando...', true);
+    setBar(15);
 
     try {
       console.log('[UPDATE] Descargando desde', _updPendingUrl);
       const r = await fetch(_updPendingUrl + '?t=' + Date.now(), { cache: 'no-store' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      if (bar) bar.style.width = '70%';
+      if (!r.ok) throw new Error('Error HTTP ' + r.status + ' al descargar');
+      setBar(60);
 
       const nuevoHtml = await r.text();
-      if (!nuevoHtml || nuevoHtml.length < 1000) throw new Error('HTML descargado muy pequeño');
-      if (bar) bar.style.width = '90%';
+      if (!nuevoHtml || nuevoHtml.length < 5000) throw new Error('Archivo descargado inválido (' + (nuevoHtml||'').length + ' bytes)');
+      setBar(85);
+      console.log('[UPDATE] Descargado OK — ' + nuevoHtml.length + ' bytes');
 
-      console.log('[UPDATE] Descargado OK (' + nuevoHtml.length + ' bytes)');
-
-      // En Electron — intentar reemplazar el archivo vía ipcRenderer
+      // Electron: usar ipcRenderer para escribir el archivo físicamente
       if (typeof window.require === 'function') {
-        try {
-          const { ipcRenderer } = window.require('electron');
+        let ipcRenderer;
+        try { ipcRenderer = window.require('electron').ipcRenderer; } catch(e) {}
+
+        if (ipcRenderer) {
+          setBtnEstado('Instalando...', true);
           ipcRenderer.send('upd-replace-file', nuevoHtml);
-          ipcRenderer.once('upd-done', () => {
-            if (bar) bar.style.width = '100%';
-            console.log('[UPDATE] Archivo reemplazado, recargando...');
-            setTimeout(() => location.reload(), 500);
+
+          // Esperar respuesta del main process
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Tiempo de espera agotado')), 10000);
+            ipcRenderer.once('upd-done', () => { clearTimeout(timer); resolve(); });
+            ipcRenderer.once('upd-error', (ev, msg) => { clearTimeout(timer); reject(new Error(msg)); });
           });
-          ipcRenderer.once('upd-error', (ev, msg) => {
-            throw new Error('ipcRenderer: ' + msg);
-          });
+
+          setBar(100);
+          setBtnEstado('✅ ¡Listo! Recargando...', true);
+          console.log('[UPDATE] Instalado correctamente, recargando...');
+          setTimeout(() => location.reload(), 800);
           return;
-        } catch(eIpc) {
-          console.warn('[UPDATE] ipcRenderer no disponible:', eIpc.message, '— usando blob');
         }
       }
 
-      // Fallback navegador: blob URL
-      if (bar) bar.style.width = '100%';
-      const blob = new Blob([nuevoHtml], { type: 'text/html' });
-      setTimeout(() => { location.href = URL.createObjectURL(blob); }, 300);
+      // Fallback (navegador sin Electron): no puede escribir archivos
+      throw new Error('No se puede instalar automáticamente. Reemplazá el index.html manualmente.');
 
     } catch(e) {
-      console.error('[UPDATE] Error al aplicar:', e.message);
-      if (btn)  { btn.disabled = false; btn.textContent = '⬇ Actualizar ahora'; }
+      console.error('[UPDATE] Error:', e.message);
+      setBtnEstado('⬇ Actualizar ahora', false);
       if (prog) prog.style.display = 'none';
-      if (typeof showToast === 'function') showToast('❌ Error: ' + e.message, 'error');
+      if (typeof showToast === 'function') showToast('❌ ' + e.message, 'error', 7000);
     }
   };
 
