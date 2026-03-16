@@ -1715,15 +1715,48 @@
         ];
 
         function patronToggle() {
-            const wrap = document.getElementById('patron-wrap');
-            if (!wrap) return;
-            _patronActivo = wrap.style.display === 'none';
-            wrap.style.display = _patronActivo ? 'block' : 'none';
-            if (_patronActivo) {
-                patronLimpiar();
-                patronDibujar();
-                patronIniciarEventos();
+            const pop = document.getElementById('patron-popover');
+            if (!pop) return;
+            const visible = pop.style.display !== 'none';
+            if (visible) { patronCerrar(); return; }
+
+            // Posicionar el panel cerca del botón
+            const btn = document.querySelector('button[onclick="patronToggle()"]');
+            if (btn) {
+                const rect  = btn.getBoundingClientRect();
+                const panel = document.getElementById('patron-panel');
+                let top  = rect.bottom + 6;
+                let left = rect.left;
+                // Evitar que se salga por la derecha
+                if (left + 230 > window.innerWidth - 10) left = window.innerWidth - 240;
+                // Evitar que se salga por abajo
+                if (top + 320 > window.innerHeight - 10) top = rect.top - 330;
+                panel.style.top  = top  + 'px';
+                panel.style.left = left + 'px';
             }
+
+            pop.style.display = 'block';
+            _patronActivo = true;
+            patronLimpiar();
+            patronDibujar();
+            patronIniciarEventos();
+        }
+
+        function patronCerrar() {
+            const pop = document.getElementById('patron-popover');
+            if (pop) pop.style.display = 'none';
+            _patronActivo = false;
+        }
+
+        function patronConfirmar() {
+            // Si hay secuencia guardada, mostrar label y cerrar
+            const seq = document.getElementById('o-patron-seq').value;
+            const lbl = document.getElementById('patron-guardado-label');
+            if (seq && lbl) {
+                lbl.style.display = 'block';
+                lbl.textContent   = '🔷 Patrón: ' + seq.split('-').join(' → ');
+            }
+            patronCerrar();
         }
 
         function patronLimpiar() {
@@ -1732,6 +1765,8 @@
             document.getElementById('o-patron-img').value = '';
             const seq = document.getElementById('patron-seq');
             if (seq) seq.textContent = '';
+            const lbl = document.getElementById('patron-guardado-label');
+            if (lbl) { lbl.style.display='none'; lbl.textContent=''; }
             patronDibujar();
         }
 
@@ -1907,18 +1942,8 @@
                               🔷 Patrón
                             </button>
                           </div>
-                          <!-- Grilla de patrón -->
-                          <div id="patron-wrap" style="display:none;margin-top:8px;background:var(--input-bg);border:1px solid var(--accent);border-radius:12px;padding:12px;text-align:center;">
-                            <canvas id="patron-canvas" width="180" height="180"
-                              style="border-radius:8px;cursor:crosshair;touch-action:none;display:block;margin:0 auto;"></canvas>
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-                              <span id="patron-seq" style="font-size:.72rem;color:var(--text-muted);font-family:monospace;"></span>
-                              <button type="button" onclick="patronLimpiar()"
-                                style="font-size:.72rem;padding:3px 10px;background:transparent;border:1px solid var(--accent);border-radius:6px;color:var(--text-muted);cursor:pointer;">
-                                Limpiar
-                              </button>
-                            </div>
-                          </div>
+                          <!-- Indicador de patrón guardado -->
+                          <div id="patron-guardado-label" style="display:none;font-size:.7rem;color:#6366f1;margin-top:4px;font-family:monospace;"></div>
                           <input type="hidden" id="o-patron-img">
                           <input type="hidden" id="o-patron-seq">
                         </div>
@@ -7333,4 +7358,45 @@ nav = async function(v) {
 
 })();
 </script>
+
+<!-- ══════════════════════════════════════════════════════
+     POPOVER PATRÓN DE DESBLOQUEO
+══════════════════════════════════════════════════════ -->
+<div id="patron-popover" style="display:none;position:fixed;inset:0;z-index:9800;pointer-events:none;">
+  <!-- Overlay semitransparente clickeable para cerrar -->
+  <div onclick="patronCerrar()" style="position:absolute;inset:0;pointer-events:all;"></div>
+  <!-- Panel flotante -->
+  <div id="patron-panel" style="
+    position:absolute;
+    background:var(--panel);
+    border:1px solid #6366f1;
+    border-radius:18px;
+    padding:18px;
+    width:230px;
+    box-shadow:0 16px 48px rgba(0,0,0,.6);
+    pointer-events:all;
+    z-index:1;">
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <span style="font-weight:800;font-size:.9rem;color:var(--text);">🔷 Patrón de desbloqueo</span>
+      <button onclick="patronCerrar()" style="background:none;border:none;color:var(--text-muted);font-size:1.1rem;cursor:pointer;padding:0;line-height:1;">✕</button>
+    </div>
+    <!-- Canvas -->
+    <canvas id="patron-canvas" width="190" height="190"
+      style="border-radius:10px;cursor:crosshair;touch-action:none;display:block;margin:0 auto;background:var(--input-bg);border:1px solid var(--accent);"></canvas>
+    <!-- Secuencia + limpiar -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
+      <span id="patron-seq" style="font-size:.7rem;color:#6366f1;font-family:monospace;"></span>
+      <button type="button" onclick="patronLimpiar()"
+        style="font-size:.7rem;padding:3px 10px;background:transparent;border:1px solid var(--accent);border-radius:6px;color:var(--text-muted);cursor:pointer;">
+        Limpiar
+      </button>
+    </div>
+    <!-- Botón confirmar -->
+    <button onclick="patronConfirmar()"
+      style="width:100%;margin-top:10px;padding:9px;background:linear-gradient(135deg,#6366f1,#4f46e5);border:none;border-radius:10px;color:white;font-weight:700;font-size:.85rem;cursor:pointer;">
+      ✅ Confirmar patrón
+    </button>
+  </div>
+</div>
 </body></html>
